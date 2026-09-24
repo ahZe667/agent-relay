@@ -1,0 +1,10 @@
+.venv
+.git
+.github
+k8s
+__pycache__
+.pytest_cache
+.ruff_cache
+*.db
+*.db-*
+*-credentials.json

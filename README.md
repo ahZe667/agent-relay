@@ -97,6 +97,49 @@ recreates all tables on whatever `RELAY_DATABASE_URL` points at, so stop
 the dev server first or set `RELAY_DATABASE_URL` to a scratch file before
 running tests against another database.
 
-This starter intentionally does not include Docker, Kubernetes, CI, external
-brokers, an LLM, or a PostgreSQL implementation. Those are deployment and
-student-port concerns rather than part of the local relay protocol.
+`test_integration.py` runs acceptance scenario 1 against a running relay (real
+API and database). It is skipped unless `RELAY_BASE_URL` is set:
+
+```bash
+RELAY_BASE_URL=http://127.0.0.1:8000 uv run pytest -q test_integration.py
+```
+
+## PostgreSQL
+
+Set `RELAY_DATABASE_URL=postgresql+psycopg://user:pass@host:5432/db`. On
+PostgreSQL the SQLite `BEGIN IMMEDIATE` seam becomes a plain transaction and
+claims, heartbeats, terminal submissions and recovery take row locks
+(`FOR UPDATE SKIP LOCKED` for claims and recovery), always locking the task row
+before its attempts.
+
+## Docker
+
+```bash
+docker build -t agent-relay:local .
+docker run --rm -p 8000:8000 agent-relay:local            # SQLite in /data
+docker compose up --build                                  # API + PostgreSQL
+```
+
+## Kubernetes (kind)
+
+```bash
+kind create cluster --name agent-relay
+kind load docker-image agent-relay:local --name agent-relay
+kubectl apply -f k8s/
+kubectl rollout status deployment/agent-relay
+kubectl port-forward svc/agent-relay 8080:8000             # http://127.0.0.1:8080/
+```
+
+## CI/CD
+
+`.github/workflows/ci.yml` runs the unit tests and the integration test against
+PostgreSQL, then builds a uniquely tagged image, loads it into kind and waits
+for the rollout. The deploy job runs only after the tests pass and only when
+`DEPLOY_TARGET=kind`, so it is skipped on GitHub. Run it locally with
+[act](https://nektosact.com/):
+
+```bash
+act push -P ubuntu-latest=catthehacker/ubuntu:act-latest \
+  --var DEPLOY_TARGET=kind \
+  -s KUBECONFIG="$(kind get kubeconfig --name agent-relay)"
+```

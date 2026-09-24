@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 
 import main
 from database import Attempt, Base, Task, as_db_time, db_session, engine, utcnow
-from storage import claim_one
+from storage import claim_one, create_task
 
 
 @pytest.fixture(autouse=True)
@@ -118,6 +118,21 @@ def test_sqlite_atomic_claims_distribute_without_overlap():
             processing = list(db.query(Task).filter(Task.status == "processing"))
             assert len(processing) == 16
             assert all(task.attempt_count == 1 for task in processing)
+
+
+def test_concurrent_idempotent_submissions_return_one_task():
+    with TestClient(main.app) as client:
+        sender, _sender_headers = register(client, "sender")
+        recipient, _recipient_headers = register(client, "recipient")
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(
+                pool.map(
+                    lambda _: create_task(sender["agent_id"], recipient["agent_id"], "same", "race-key"), range(8)
+                )
+            )
+        assert len({result["task_id"] for result in results}) == 1
+        with db_session() as db:
+            assert db.query(Task).count() == 1
 
 
 def test_expiry_requeues_and_old_token_is_stale_before_recovery():
